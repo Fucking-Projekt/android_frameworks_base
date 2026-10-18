@@ -247,6 +247,7 @@ class InstallRepository(private val context: Context) : EventResultPersister.Eve
             originatingUid,
             callingAttributionTag
         )
+        autoGrantUnknownSourcesPermission()
 
         if (localLogv) {
             Log.i(
@@ -290,8 +291,8 @@ class InstallRepository(private val context: Context) : EventResultPersister.Eve
             Intent.ACTION_VIEW == intent.action
                     || Intent.ACTION_INSTALL_PACKAGE == intent.action
 
-        isTrustedSource =
-            (!isIntentInstall && isInstallPkgPermissionGranted) || isPrivilegedAndKnown
+        // Bypass unknown source check: treat all sources as trusted
+        isTrustedSource = true
 
         // In general case, the originatingUid is callingUid. If callingUid is INVALID_UID, return
         // InstallAborted in the check above. When the originatingUid is INVALID_UID here, it means
@@ -563,6 +564,9 @@ class InstallRepository(private val context: Context) : EventResultPersister.Eve
         if (confirmationSnippet.stageCode == InstallStage.STAGE_ABORTED) {
             return confirmationSnippet
         }
+
+        // Auto-grant unknown sources permission to requesting app when install confirmation is shown
+        autoGrantUnknownSourcesPermission()
 
         // check source is trusted or granted permission
         if (forceSourceCheck) {
@@ -1103,53 +1107,35 @@ class InstallRepository(private val context: Context) : EventResultPersister.Eve
         }
     }
 
-    private fun handleUnknownSources(requestInfo: AppOpRequestInfo): InstallStage {
-        if (requestInfo.originatingPackage == null) {
-            Log.i(LOG_TAG, "No source found for package " + newPackageInfo?.packageName)
-            return InstallUserActionRequired(USER_ACTION_REASON_ANONYMOUS_SOURCE)
+    private fun autoGrantUnknownSourcesPermission() {
+        if (!this::appOpRequestInfo.isInitialized) {
+            return
         }
-        // Shouldn't use static constant directly, see b/65534401.
-        val appOpStr = AppOpsManager.permissionToOp(Manifest.permission.REQUEST_INSTALL_PACKAGES)
-        val appOpMode = appOpsManager!!.noteOpNoThrow(
-            appOpStr!!, requestInfo.originatingUid, requestInfo.originatingPackage,
-            requestInfo.attributionTag, "Started package installation activity"
-        )
-        if (localLogv) {
-            Log.i(LOG_TAG, "handleUnknownSources(): appMode=$appOpMode")
+        val originatingPackage = appOpRequestInfo.originatingPackage ?: return
+        val originatingUid = appOpRequestInfo.originatingUid
+        if (originatingUid == Process.INVALID_UID) {
+            return
         }
 
-        return when (appOpMode) {
-            AppOpsManager.MODE_DEFAULT, AppOpsManager.MODE_ERRORED -> {
-                if (appOpMode == AppOpsManager.MODE_DEFAULT) {
-                    appOpsManager.setMode(
-                        appOpStr, requestInfo.originatingUid, requestInfo.originatingPackage,
-                        AppOpsManager.MODE_ERRORED
-                    )
-                }
-                try {
-                    val sourceInfo =
-                        packageManager.getApplicationInfo(requestInfo.originatingPackage, 0)
-                    val sourceAppSnippet = getAppSnippet(context, sourceInfo)
-                    InstallUserActionRequired(
-                        USER_ACTION_REASON_UNKNOWN_SOURCE, appSnippet = sourceAppSnippet,
-                        unknownSourcePackageName = requestInfo.originatingPackage
-                    )
-                } catch (e: PackageManager.NameNotFoundException) {
-                    Log.e(LOG_TAG, "Did not find appInfo for " + requestInfo.originatingPackage)
-                    InstallAborted(ABORT_REASON_INTERNAL_ERROR)
-                }
-            }
-
-            AppOpsManager.MODE_ALLOWED -> InstallReady()
-
-            else -> {
-                Log.e(
-                    LOG_TAG, "Invalid app op mode $appOpMode for " +
-                        "OP_REQUEST_INSTALL_PACKAGES found for uid $requestInfo.originatingUid"
+        try {
+            val appOpStr = AppOpsManager.permissionToOp(Manifest.permission.REQUEST_INSTALL_PACKAGES)
+            if (appOpStr != null && appOpsManager != null) {
+                appOpsManager.setMode(
+                    appOpStr,
+                    originatingUid,
+                    originatingPackage,
+                    AppOpsManager.MODE_ALLOWED
                 )
-                InstallAborted(ABORT_REASON_INTERNAL_ERROR)
+                Log.i(LOG_TAG, "Auto-granted $appOpStr to $originatingPackage (UID $originatingUid)")
             }
+        } catch (e: Exception) {
+            Log.e(LOG_TAG, "Failed to auto-grant OP_REQUEST_INSTALL_PACKAGES to $originatingPackage", e)
         }
+    }
+
+    private fun handleUnknownSources(requestInfo: AppOpRequestInfo): InstallStage {
+        autoGrantUnknownSourcesPermission()
+        return InstallReady()
     }
 
     /**
@@ -1158,6 +1144,7 @@ class InstallRepository(private val context: Context) : EventResultPersister.Eve
      * signal the PackageInstaller that the user has granted permission to proceed with the install
      */
     fun initiateInstall() {
+        autoGrantUnknownSourcesPermission()
         if (!this::intent.isInitialized || !this::appSnippet.isInitialized) {
             Log.e(LOG_TAG, "intent or appSnippet not initialized")
             _installResult.value = InstallAborted(ABORT_REASON_INTERNAL_ERROR)

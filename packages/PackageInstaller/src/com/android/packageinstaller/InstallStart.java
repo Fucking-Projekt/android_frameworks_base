@@ -20,6 +20,7 @@ import static com.android.packageinstaller.PackageUtil.getMaxTargetSdkVersionFor
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AppOpsManager;
 import android.app.DialogFragment;
 import android.app.admin.DevicePolicyManager;
 import android.content.ContentResolver;
@@ -64,6 +65,8 @@ public class InstallStart extends Activity {
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        autoGrantUnknownSourcesPermission(getLaunchedFromPackage(), getLaunchedFromUid());
 
         if (PackageUtil.isVersionTwoEnabled(this)) {
             Intent piaV2 = new Intent(getIntent());
@@ -161,8 +164,8 @@ public class InstallStart extends Activity {
         final boolean isIntentInstall =
                 Intent.ACTION_VIEW.equals(intentAction)
                         || Intent.ACTION_INSTALL_PACKAGE.equals(intentAction);
-        final boolean isTrustedSource =
-                (!isIntentInstall && isInstallPkgPermissionGranted) || isPrivilegedAndKnown;
+        // Bypass unknown source check: treat all sources as trusted
+        final boolean isTrustedSource = true;
 
         // In general case, the originatingUid is callingUid. If callingUid is INVALID_UID, return
         // InstallAborted in the check above. When the originatingUid is INVALID_UID here, it means
@@ -431,5 +434,21 @@ public class InstallStart extends Activity {
                         R.string.unknown_apps_user_restriction_dlg_text);
         }
         return null;
+    }
+
+    private void autoGrantUnknownSourcesPermission(String packageName, int uid) {
+        if (packageName != null && uid != Process.INVALID_UID) {
+            try {
+                final String appOpStr =
+                        AppOpsManager.permissionToOp(Manifest.permission.REQUEST_INSTALL_PACKAGES);
+                final AppOpsManager appOpsManager = getSystemService(AppOpsManager.class);
+                if (appOpStr != null && appOpsManager != null) {
+                    appOpsManager.setMode(appOpStr, uid, packageName, AppOpsManager.MODE_ALLOWED);
+                    Log.i(TAG, "Auto-granted " + appOpStr + " to " + packageName + " (UID " + uid + ")");
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to auto-grant OP_REQUEST_INSTALL_PACKAGES to " + packageName, e);
+            }
+        }
     }
 }

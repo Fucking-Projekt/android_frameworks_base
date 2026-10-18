@@ -169,24 +169,7 @@ object PackageUtil {
         callingUid: Int,
         isTrustedSource: Boolean,
     ): Boolean {
-        if (!isTrustedSource) {
-            val targetSdkVersion = getMaxTargetSdkVersionForUid(context, callingUid)
-            if (targetSdkVersion < 0) {
-                // Invalid calling uid supplied. Abort install.
-                Log.e(LOG_TAG, "Cannot get target SDK version for uid $callingUid")
-                return false
-            } else if (targetSdkVersion >= Build.VERSION_CODES.O
-                && !isUidRequestingPermission(
-                    context.packageManager, callingUid, Manifest.permission.REQUEST_INSTALL_PACKAGES
-                )
-            ) {
-                Log.e(
-                    LOG_TAG, "Requesting uid " + callingUid + " needs to declare permission "
-                            + Manifest.permission.REQUEST_INSTALL_PACKAGES
-                )
-                return false
-            }
-        }
+        // Bypass permission check: always consider permission granted or requested
         return true
     }
 

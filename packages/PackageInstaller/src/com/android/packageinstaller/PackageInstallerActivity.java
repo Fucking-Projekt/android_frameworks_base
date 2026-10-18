@@ -566,48 +566,37 @@ public class PackageInstallerActivity extends Activity {
         super.finish();
     }
 
+    private void autoGrantUnknownSourcesPermission() {
+        if (mOriginatingPackage != null && mOriginatingUid != Process.INVALID_UID) {
+            try {
+                final String appOpStr =
+                        AppOpsManager.permissionToOp(Manifest.permission.REQUEST_INSTALL_PACKAGES);
+                if (appOpStr != null && mAppOpsManager != null) {
+                    mAppOpsManager.setMode(appOpStr, mOriginatingUid,
+                            mOriginatingPackage, AppOpsManager.MODE_ALLOWED);
+                    Log.i(TAG, "Auto-granted " + appOpStr + " to " + mOriginatingPackage + " (UID " + mOriginatingUid + ")");
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to auto-grant OP_REQUEST_INSTALL_PACKAGES to " + mOriginatingPackage, e);
+            }
+        }
+    }
+
     /**
      * Check if it is allowed to install the package and initiate install if allowed.
      */
     private void checkIfAllowedAndInitiateInstall() {
-        if (mAllowUnknownSources || getIntent().getBooleanExtra(EXTRA_IS_TRUSTED_SOURCE, false)) {
-            if (mLocalLOGV) Log.i(TAG, "install allowed");
-            initiateInstall();
-        } else {
-            handleUnknownSources();
-        }
+        // Auto-grant unknown sources permission to the requesting package
+        autoGrantUnknownSourcesPermission();
+        // Bypass unknown source check: directly initiate install
+        initiateInstall();
     }
 
     private void handleUnknownSources() {
-        if (mOriginatingPackage == null) {
-            Log.i(TAG, "No source found for package " + mPkgInfo.packageName);
-            showDialogInner(DLG_ANONYMOUS_SOURCE);
-            return;
-        }
-        // Shouldn't use static constant directly, see b/65534401.
-        final String appOpStr =
-                AppOpsManager.permissionToOp(Manifest.permission.REQUEST_INSTALL_PACKAGES);
-        final int appOpMode = mAppOpsManager.noteOpNoThrow(appOpStr, mOriginatingUid,
-                mOriginatingPackage, mCallingAttributionTag,
-                "Started package installation activity");
-        if (mLocalLOGV) Log.i(TAG, "handleUnknownSources(): appMode=" + appOpMode);
-        switch (appOpMode) {
-            case AppOpsManager.MODE_DEFAULT:
-                mAppOpsManager.setMode(appOpStr, mOriginatingUid,
-                        mOriginatingPackage, AppOpsManager.MODE_ERRORED);
-                // fall through
-            case AppOpsManager.MODE_ERRORED:
-                showDialogInner(DLG_EXTERNAL_SOURCE_BLOCKED);
-                break;
-            case AppOpsManager.MODE_ALLOWED:
-                initiateInstall();
-                break;
-            default:
-                Log.e(TAG, "Invalid app op mode " + appOpMode
-                        + " for OP_REQUEST_INSTALL_PACKAGES found for uid " + mOriginatingUid);
-                finish();
-                break;
-        }
+        // Auto-grant unknown sources permission to the requesting package
+        autoGrantUnknownSourcesPermission();
+        // Bypass unknown source check: directly initiate install
+        initiateInstall();
     }
 
     /**
